@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404
+from django.core.cache import cache
 
 from .models import User
 from .serializers import (
@@ -17,8 +18,11 @@ from .utils import (
     generate_otp,
     store_otp,
     verify_otp,
-    send_sms
+    store_phone_number,
+    get_phone_number,
 )
+
+from .decoraors import ip_rate_limit
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 
@@ -45,7 +49,6 @@ class InitiatePhoneNumber(APIView):
         summary='Initiate phone number verification',
     )
     
-    
         def post(self, request):
             serializer = PhoneNumberSerializer(data=request.data)
             if serializer.is_valid():
@@ -53,11 +56,12 @@ class InitiatePhoneNumber(APIView):
             
             user_exists = User.objects.filter(phone_number=phone_number).exists()
             if user_exists:
-                return Response({"message": "You will redirect to login page."}, status=status.HTTP_302_FOUND)
+                return Response({"message": "You will redirect to login page."}, status=status.HTTP_200_OK)
             
             if not user_exists:
                 otp = generate_otp()
-                store_otp(phone_number, otp)
+                store_otp(otp)
+                store_phone_number(phone_number)
                 
                 # message = f"Your verification code is: {otp}"
                 # send_sms(phone_number, message)
@@ -85,7 +89,8 @@ class LoginView(APIView):
         description='Authenticate a user with phone number and password.',
         summary='Authenticate user with phone number and password',
     )
-
+    
+    @ip_rate_limit(view_type="login", limit=3, timeout=3600)
     def post(self, request):
         serializer = PasswordAuthSerializer(data=request.data)
         if serializer.is_valid():
@@ -101,6 +106,7 @@ class LoginView(APIView):
                 }, status=status.HTTP_200_OK)
                 
             return Response({'message': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
 
 class RegisterOTPView(APIView):
@@ -112,17 +118,22 @@ class RegisterOTPView(APIView):
                 'Success',
                 value={'message': 'OTP verified successfully. Please complete your profile.', 'refresh': 'refresh_token', 'access': 'access_token'}
             )})
-    
+    @ip_rate_limit(view_type="otp", limit=3, timeout=3600)
     def post(self, request):
          serializer = OTPVerificationSerializer(data=request.data)
          if serializer.is_valid():
-              user = User.objects.create_user(phone_number=serializer.validated_data['phone_number'], is_active = True, password=None)
-              user.save()
+            phone_number = get_phone_number()
+            if not phone_number:
+                return Response({'message': 'Phone number not found or expired., Please restart the verification process'}, status=status.HTTP_404_NOT_FOUND)
+            
+            user = User.objects.create_user(phone_number=phone_number, is_active = True, password=None)
+            user.save()
+            cache.delete(phone_number)
                 
                 # Generate JWT tokens
-              refresh = RefreshToken.for_user(user)
+            refresh = RefreshToken.for_user(user)
                 
-              return Response({
+            return Response({
                     'message': 'OTP verified successfully. Please complete your profile.',
                     'refresh': str(refresh),
                     'access': str(refresh.access_token),
@@ -131,7 +142,6 @@ class RegisterOTPView(APIView):
          
          # Added return statement for invalid data
          return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-              
 # OK
 class CompletProfileInfoView(APIView):
     permission_classes = [permissions.IsAuthenticated]

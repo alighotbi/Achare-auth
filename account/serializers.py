@@ -3,7 +3,7 @@ import re
 from rest_framework import serializers
 from .models import User
 from django.shortcuts import get_object_or_404
-from .utils import generate_otp, store_otp, verify_otp, send_sms
+from .utils import generate_otp, store_otp, verify_otp
 
 def validate_phone_number_format(value):
     """
@@ -25,13 +25,15 @@ class PhoneNumberSerializer(serializers.Serializer): #1
         return validate_phone_number_format(value)
     
     
+    
+    
 # OK
 class OTPVerificationSerializer(serializers.Serializer): #2
-    phone_number = serializers.CharField(max_length=11)
+    # phone_number = serializers.CharField(max_length=11)
     otp = serializers.CharField(max_length=6)
     
-    def validate_phone_number(self, value):
-        return validate_phone_number_format(value)
+    # def validate_phone_number(self, value):
+    #     return validate_phone_number_format(value)
     
     #  # Method to generate and send OTP
     # def generate_and_send_otp(self, phone_number):
@@ -41,16 +43,24 @@ class OTPVerificationSerializer(serializers.Serializer): #2
     #     send_sms(phone_number, message)
     #     return otp
     
-    
-    def validate(self, data):
-        phone_number = data.get('phone_number')
-        otp = data.get('otp')
+    def validate_otp(self, value):
+        otp = value
         
-        # Verify the OTP matches what was stored
-        if not verify_otp(phone_number, otp):
+        if not verify_otp(otp):
             raise serializers.ValidationError({"otp": "Invalid or expired OTP"})
+        
+        return value
+    
+    
+    # def validate(self, data):
+    #     phone_number = data.get('phone_number')
+    #     otp = data.get('otp')
+        
+    #     # Verify the OTP matches what was stored
+    #     if not verify_otp(phone_number, otp):
+    #         raise serializers.ValidationError({"otp": "Invalid or expired OTP"})
             
-        return data
+    #     return data
     
 # OK 
 class PasswordAuthSerializer(serializers.Serializer): #5
